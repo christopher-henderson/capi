@@ -1,6 +1,6 @@
 build:
   languages:
-    - go1.11
+    - go
   pre:
     - make clean all
   packages:
