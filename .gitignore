@@ -1,3 +1,7 @@
+tools/
+*DS_STORE*
+.idea
+bin/
 nss/
 
 # Binaries for programs and plugins

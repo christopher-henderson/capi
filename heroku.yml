@@ -1,0 +1,13 @@
+build:
+  languages:
+    - go1.11
+  pre:
+    - make clean all
+  packages:
+    - hg
+    - ninja-build
+    - gyp
+    - g++
+    - make
+run:
+  web: export DYLD_LIBRARY_PATH=bin/dist/Release/lib/;export PATH=$PATH:bin/dist/Release/bin/;./capi

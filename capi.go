@@ -76,18 +76,6 @@ func verifyCertificateChain(resp http.ResponseWriter, req *http.Request) {
 		resp.WriteHeader(500)
 		fmt.Fprintf(resp, "internal error: %s", err)
 	}
-	//results := make([]*model.CertificateResultOld, len(chain))
-	//for i, cert := range chain {
-	//	results[i] = model.NewCertificateResult(cert)
-	//}
-	//validation.Verify(results)
-	//encoder := json.NewEncoder(resp)
-	//encoder.SetIndent("", "    ")
-	//err = encoder.Encode(results)
-	//if err != nil {
-	//	resp.WriteHeader(500)
-	//	fmt.Fprintf(resp, "internal error: %s", err)
-	//}
 }
 
 func verifyCertificateChainNoCA(resp http.ResponseWriter, req *http.Request) {
@@ -128,10 +116,6 @@ func VerifyChain(chain []*x509.Certificate) model.ChainResult {
 	crls := crl.VerifyChain(chain)
 	result.Leaf = model.NewCeritifcateResult(chain[0], ocsps[0], crls[0], expirations[0])
 	result.Intermediates = make([]model.CertificateResult, len(chain[1:len(chain)-1]))
-	log.Println(chain)
-	log.Println(len(chain) - 1)
-	log.Println(len(ocsps))
-	log.Println(len(crls))
 	for i := 1; i < len(chain)-1; i++ {
 		result.Intermediates[i-1] = model.NewCeritifcateResult(chain[i], ocsps[i], crls[i], expirations[i])
 	}
@@ -170,7 +154,7 @@ func NormalizePEM(pem []byte) (fmtedPEM []byte) {
 	return append(fmtedPEM, "-----END CERTIFICATE-----"...)
 }
 
-const DIST = "/Users/chris/Documents/Contracting/mozilla/testWebSites/dist/Debug"
+const DIST = "./dist/Release"
 
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)

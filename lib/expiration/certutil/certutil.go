@@ -5,13 +5,11 @@ import (
 	"crypto"
 	"crypto/x509"
 	"fmt"
+	"github.com/pkg/errors"
 	"io/ioutil"
 	"log"
 	"os"
 	"os/exec"
-	"path"
-
-	"github.com/pkg/errors"
 )
 
 type Fingerprint = string
@@ -69,15 +67,15 @@ const (
 var executable = "certutil"
 
 func Init(dist string) error {
-	ldpath := os.Getenv(LIBRARY_PATH)
-	ldpath = ldpath + ":" + path.Join(dist, "lib")
-	if err := os.Setenv(LIBRARY_PATH, ldpath); err != nil {
-		return err
-	}
-	binPath := os.Getenv("PATH")
-	if err := os.Setenv("PATH", binPath+":"+path.Join(dist, "bin")); err != nil {
-		return err
-	}
+	//ldpath := os.Getenv(LIBRARY_PATH)
+	//ldpath = ldpath + ":" + path.Join(dist, "lib")
+	//if err := os.Setenv(LIBRARY_PATH, ldpath); err != nil {
+	//	return err
+	//}
+	//binPath := os.Getenv("PATH")
+	//if err := os.Setenv("PATH", binPath+":"+path.Join(dist, "bin")); err != nil {
+	//	return err
+	//}
 	help, err := execute([]string{})
 	if !bytes.Contains(help, []byte("certutil - Utility to manipulate NSS certificate databases")) {
 		return errors.Wrap(err, fmt.Sprintf("Failed to load '%s' given the PATH=%s\n$ certutil\n%s", executable, os.Getenv("PATH"), string(help)))
