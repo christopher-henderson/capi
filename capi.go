@@ -166,7 +166,7 @@ func main() {
 	}
 	http.HandleFunc("/", verifyCertificateChain)
 	http.HandleFunc("/bundledCA", verifyCertificateChainNoCA)
-	if err := http.ListenAndServe("0.0.0.0", nil); err != nil {
+	if err := http.ListenAndServe("0.0.0.0:80", nil); err != nil {
 		log.Panicln(err)
 	}
 }
