@@ -18,6 +18,7 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"os"
 	"regexp"
 )
 
@@ -166,7 +167,7 @@ func main() {
 	}
 	http.HandleFunc("/", verifyCertificateChain)
 	http.HandleFunc("/bundledCA", verifyCertificateChainNoCA)
-	if err := http.ListenAndServe("0.0.0.0:8080", nil); err != nil {
+	if err := http.ListenAndServe("0.0.0.0:" + os.Getenv("PORT"), nil); err != nil {
 		log.Panicln(err)
 	}
 }
