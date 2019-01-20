@@ -7,7 +7,7 @@ build:
     - hg
     - ninja-build
     - gyp
-    - g++
     - make
+    - g++
 run:
   web: export DYLD_LIBRARY_PATH=bin/dist/Release/lib/;export PATH=$PATH:bin/dist/Release/bin/;./capi
