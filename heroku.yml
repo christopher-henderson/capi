@@ -1,0 +1,7 @@
+build:
+  languages:
+    - go
+  packages:
+    - libnss3-tools
+run:
+  web: capi
