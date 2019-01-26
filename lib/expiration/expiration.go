@@ -19,7 +19,7 @@ const (
 
 	UnexpectedResponse
 )
-func (s Status) Marshal(v interface{}) ([]byte, error) {
+func (s Status) MarshalJSON(v interface{}) ([]byte, error) {
 	return map[Status][]byte{
 		Valid: []byte("valid"),
 		Expired: []byte("expired"),
