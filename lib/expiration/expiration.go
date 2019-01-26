@@ -26,7 +26,7 @@ func (s Status) MarshalJSON(v interface{}) ([]byte, error) {
 		IssuerUnknown: []byte("issuerUnknown"),
 		UnexpectedResponse: []byte("unexpected response, please see the Raw field"),
 	}[s], nil
-}}
+}
 
 func toStatus(nssResponse string) (Status, bool) {
 	status, ok := map[string]Status{
