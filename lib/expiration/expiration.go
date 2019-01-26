@@ -19,15 +19,14 @@ const (
 
 	UnexpectedResponse
 )
-
-func (s Status) MarhsalJSON() string {
-	return map[Status]string{
-		Valid: "valid",
-		Expired: "expired",
-		IssuerUnknown: "issuerUnknown",
-		UnexpectedResponse: "unexpected response, please see the Raw field",
-	}[s]
-}
+func (s Status) Marshal(v interface{}) ([]byte, error) {
+	return map[Status][]byte{
+		Valid: []byte("valid"),
+		Expired: []byte("expired"),
+		IssuerUnknown: []byte("issuerUnknown"),
+		UnexpectedResponse: []byte("unexpected response, please see the Raw field"),
+	}[s], nil
+}}
 
 func toStatus(nssResponse string) (Status, bool) {
 	status, ok := map[string]Status{
