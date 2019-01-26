@@ -64,24 +64,7 @@ const (
 	ISSUER_UNKOWN = "certutil: certificate is invalid: Peer's Certificate issuer is not recognized."
 )
 
-var executable = "certutil"
-
-func Init(dist string) error {
-	//ldpath := os.Getenv(LIBRARY_PATH)
-	//ldpath = ldpath + ":" + path.Join(dist, "lib")
-	//if err := os.Setenv(LIBRARY_PATH, ldpath); err != nil {
-	//	return err
-	//}
-	//binPath := os.Getenv("PATH")
-	//if err := os.Setenv("PATH", binPath+":"+path.Join(dist, "bin")); err != nil {
-	//	return err
-	//}
-	help, err := execute([]string{})
-	if !bytes.Contains(help, []byte("certutil - Utility to manipulate NSS certificate databases")) {
-		return errors.Wrap(err, fmt.Sprintf("Failed to load '%s' given the PATH=%s\n$ certutil\n%s", executable, os.Getenv("PATH"), string(help)))
-	}
-	return nil
-}
+const executable = "certutil"
 
 type Certutil struct {
 	tmpDir string

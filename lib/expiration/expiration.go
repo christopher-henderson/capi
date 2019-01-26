@@ -10,10 +10,36 @@ import (
 	"github.com/pkg/errors"
 )
 
+type Status int
+
+const (
+	Valid Status = iota
+	Expired
+	IssuerUnknown
+
+	UnexpectedResponse
+)
+
+func (s Status) MarhsalJSON() string {
+	return map[Status]string{
+		Valid: "valid",
+		Expired: "expired",
+		IssuerUnknown: "issuerUnknown",
+		UnexpectedResponse: "unexpected response, please see the Raw field",
+	}[s]
+}
+
+func toStatus(nssResponse string) (Status, bool) {
+	status, ok := map[string]Status{
+		certutil.VALID: Valid,
+		certutil.EXPIRED: Expired,
+		certutil.ISSUER_UNKOWN: IssuerUnknown,
+	}[nssResponse]
+	return status, ok
+}
+
 type ExpirationStatus struct {
-	Valid         bool
-	Expired       bool
-	IssuerUnknown bool
+	Status Status
 	Raw           string
 	Error         error
 }
@@ -45,11 +71,11 @@ func queryExpiration(certificate *x509.Certificate, c certutil.Certutil) (exps E
 	resp, _ := c.Verify(certificate)
 	response := string(resp)
 	exps.Raw = response
-	exps.Valid = certutil.VALID == response
-	exps.Expired = certutil.EXPIRED == response
-	exps.IssuerUnknown = certutil.ISSUER_UNKOWN == response
-	if !exps.Valid && !exps.Expired && !exps.IssuerUnknown {
-		exps.Error = errors.New(string(response))
+	switch status, ok := toStatus(response); ok {
+	case true:
+		exps.Status = status
+	case false:
+		exps.Status = UnexpectedResponse
 	}
 	return
 }

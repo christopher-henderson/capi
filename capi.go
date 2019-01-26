@@ -11,7 +11,6 @@ import (
 	"encoding/pem"
 	"fmt"
 	"github.com/mozilla/capi/lib/expiration"
-	"github.com/mozilla/capi/lib/expiration/certutil"
 	"github.com/mozilla/capi/lib/model"
 	"github.com/mozilla/capi/lib/revocation/crl"
 	"github.com/mozilla/capi/lib/revocation/ocsp"
@@ -155,16 +154,11 @@ func NormalizePEM(pem []byte) (fmtedPEM []byte) {
 	return append(fmtedPEM, "-----END CERTIFICATE-----"...)
 }
 
-const DIST = "./dist/Release"
 
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	// Very mandatory otherwise the HTTP package will vomit on revoked/expired certificates and return an error.
 	http.DefaultTransport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
-	err := certutil.Init(DIST)
-	if err != nil {
-		log.Panicln(err)
-	}
 	http.HandleFunc("/", verifyCertificateChain)
 	http.HandleFunc("/bundledCA", verifyCertificateChainNoCA)
 	if err := http.ListenAndServe("0.0.0.0:" + os.Getenv("PORT"), nil); err != nil {

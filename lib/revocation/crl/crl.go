@@ -31,7 +31,25 @@ func queryCRLs(certificate *x509.Certificate) []CRL {
 	for i, url := range certificate.CRLDistributionPoints {
 		statuses[i] = newCRL(certificate.SerialNumber, url)
 	}
+	if disagreement := allAgree(statuses); disagreement != nil {
+		for _, status := range statuses {
+			status.Error = disagreement
+		}
+	}
 	return statuses
+}
+
+func allAgree(statuses []CRL) error {
+	if len(statuses) <= 1 {
+		return nil
+	}
+	firstAnswer := statuses[0]
+	for _, otherAnswer := range statuses[1:] {
+		if otherAnswer.Revoked != firstAnswer.Revoked {
+			return errors.New("The listed CRLs disagree with each other")
+		}
+	}
+	return nil
 }
 
 func newCRL(serialNumber *big.Int, distributionPoint string) (crl CRL) {
