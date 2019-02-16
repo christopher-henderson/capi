@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 package certutil
 
 import (
@@ -5,17 +9,8 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"github.com/pkg/errors"
-	"log"
 	"testing"
 )
-
-const DIST = "/Users/chris/Documents/Contracting/mozilla/testWebSites/dist/Debug"
-
-func init() {
-	if err := Init(DIST); err != nil {
-		log.Panic(err)
-	}
-}
 
 var letsencrypt = []byte(`-----BEGIN CERTIFICATE-----
 MIIH5jCCBs6gAwIBAgISA1D/hn92MdZxKQOTmA2iFrUHMA0GCSqGSIb3DQEBCwUA
