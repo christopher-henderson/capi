@@ -19,19 +19,20 @@ const (
 
 	UnexpectedResponse
 )
+
 func (s Status) MarshalJSON(v interface{}) ([]byte, error) {
 	return map[Status][]byte{
-		Valid: []byte("valid"),
-		Expired: []byte("expired"),
-		IssuerUnknown: []byte("issuerUnknown"),
+		Valid:              []byte("valid"),
+		Expired:            []byte("expired"),
+		IssuerUnknown:      []byte("issuerUnknown"),
 		UnexpectedResponse: []byte("unexpected response, please see the Raw field"),
 	}[s], nil
 }
 
 func toStatus(nssResponse string) (Status, bool) {
 	status, ok := map[string]Status{
-		certutil.VALID: Valid,
-		certutil.EXPIRED: Expired,
+		certutil.VALID:         Valid,
+		certutil.EXPIRED:       Expired,
 		certutil.ISSUER_UNKOWN: IssuerUnknown,
 	}[nssResponse]
 	return status, ok
@@ -39,8 +40,8 @@ func toStatus(nssResponse string) (Status, bool) {
 
 type ExpirationStatus struct {
 	Status Status
-	Raw           string
-	Error         error
+	Raw    string
+	Error  string
 }
 
 func VerifyChain(chain []*x509.Certificate) ([]ExpirationStatus, error) {

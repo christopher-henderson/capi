@@ -7,6 +7,7 @@ package ocsp
 import (
 	"bytes"
 	"crypto/x509"
+	"encoding/json"
 	"github.com/pkg/errors"
 	"golang.org/x/crypto/ocsp"
 	"io/ioutil"
@@ -50,12 +51,80 @@ import (
 //	expired     [1]     IMPLICIT RevokedInfo,
 //	unknown     [2]     IMPLICIT UnknownInfo }
 
+type OCSPStatus int
+
+const (
+	Good = iota
+	Revoked
+	Unknown
+)
+
 type OCSP struct {
 	Responder string
-	Good      bool
-	Revoked   bool
-	Unknown   bool
-	Error     error
+	Status    OCSPStatus
+	Error     string
+}
+
+func (o OCSP) MarshalJSON() ([]byte, error) {
+	return json.Marshal(map[string]string{
+		"Responder": o.Responder,
+		"Status":    o.Status.String(),
+		"Error":     o.Error,
+	})
+}
+
+func (o *OCSP) UnmarshalJSON(data []byte) error {
+	r := make(map[string]string)
+	err := json.Unmarshal(data, &r)
+	if err != nil {
+		return err
+	}
+	responder, ok := r["Responder"]
+	if !ok {
+		return errors.New("Invalid OCSP struct, missing Responder key")
+	}
+	o.Responder = responder
+	s, ok := r["Status"]
+	if !ok {
+		return errors.New("Invalid OCSP struct, missing Status key")
+	}
+	status, err := FromString(s)
+	if err != nil {
+		return err
+	}
+	o.Status = status
+	e, ok := r["Error"]
+	if !ok {
+		return errors.New("Invalid OCSP struct, missing Error key")
+	}
+	o.Error = e
+	return nil
+}
+
+func FromString(data string) (OCSPStatus, error) {
+	switch data {
+	case `good`:
+		return Good, nil
+	case `revoked`:
+		return Revoked, nil
+	case `unknown`:
+		return Unknown, nil
+	default:
+		return Unknown, errors.New("unknown OCSPStatus type " + string(data))
+	}
+}
+
+func (o OCSPStatus) String() string {
+	switch o {
+	case Good:
+		return `good`
+	case Revoked:
+		return `revoked`
+	case Unknown:
+		return `unknown`
+	default:
+		return `"error_unknown_ocsp_status"`
+	}
 }
 
 const OCSPContentType = "application/ocsp-request"
@@ -84,27 +153,32 @@ func newOCSPResponse(certificate, issuer *x509.Certificate, responder string) (r
 	response.Responder = responder
 	req, err := ocsp.CreateRequest(certificate, issuer, nil)
 	if err != nil {
-		response.Error = errors.Wrap(err, "failed to create DER encoded OCSP request")
+		response.Error = errors.Wrap(err, "failed to create DER encoded OCSP request").Error()
 		return
 	}
 	ret, err := http.Post(responder, OCSPContentType, bytes.NewReader(req))
 	if err != nil {
-		response.Error = errors.Wrapf(err, "failed to retrieve HTTP POST response from %v", responder)
+		response.Error = errors.Wrapf(err, "failed to retrieve HTTP POST response from %v", responder).Error()
 		return
 	}
 	defer ret.Body.Close()
 	httpResp, err := ioutil.ReadAll(ret.Body)
 	if err != nil {
-		response.Error = errors.Wrap(err, "failed to read the body of the OCSP response")
+		response.Error = err.Error()
 		return
 	}
 	serverResponse, err := ocsp.ParseResponse(httpResp, issuer)
 	if err != nil {
-		response.Error = errors.Wrapf(err, "failed to parse the OCSP response")
+		response.Error = err.Error()
 		return
 	}
-	response.Good = serverResponse.Status == ocsp.Good
-	response.Revoked = serverResponse.Status == ocsp.Revoked
-	response.Unknown = serverResponse.Status == ocsp.Unknown
+	switch serverResponse.Status {
+	case ocsp.Revoked:
+		response.Status = Revoked
+	case ocsp.Good:
+		response.Status = Good
+	case ocsp.Unknown:
+		response.Status = Unknown
+	}
 	return
 }

@@ -15,7 +15,7 @@ import (
 type CRL struct {
 	Endpoint string
 	Revoked  bool
-	Error    error
+	Error    string
 }
 
 func VerifyChain(chain []*x509.Certificate) [][]CRL {
@@ -33,7 +33,7 @@ func queryCRLs(certificate *x509.Certificate) []CRL {
 	}
 	if disagreement := allAgree(statuses); disagreement != nil {
 		for _, status := range statuses {
-			status.Error = disagreement
+			status.Error = disagreement.Error()
 		}
 	}
 	return statuses
@@ -56,17 +56,17 @@ func newCRL(serialNumber *big.Int, distributionPoint string) (crl CRL) {
 	raw, err := http.Get(distributionPoint)
 	crl.Endpoint = distributionPoint
 	if err != nil {
-		crl.Error = errors.Wrapf(err, "failed to retrieve CRL from distribution point %v", distributionPoint)
+		crl.Error = errors.Wrapf(err, "failed to retrieve CRL from distribution point %v", distributionPoint).Error()
 		return
 	}
 	defer raw.Body.Close()
 	b, err := ioutil.ReadAll(raw.Body)
 	if err != nil {
-		crl.Error = errors.Wrapf(err, "failed to read response from CRL distribution point %v", distributionPoint)
+		crl.Error = errors.Wrapf(err, "failed to read response from CRL distribution point %v", distributionPoint).Error()
 	}
 	c, err := x509.ParseCRL(b)
 	if err != nil {
-		crl.Error = errors.Wrapf(err, "failed to parse provided CRL\n%v", raw)
+		crl.Error = errors.Wrapf(err, "failed to parse provided CRL\n%v", raw).Error()
 		return
 	}
 	if c.TBSCertList.RevokedCertificates == nil {
