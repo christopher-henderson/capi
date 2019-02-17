@@ -27,8 +27,6 @@ import (
 
 func main() {
 	InitLogging()
-	// This is very mandatory otherwise the HTTP package will vomit on revoked/expired certificates and return an error.
-	//http.DefaultTransport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 	http.HandleFunc("/", verify)
 	port := Port()
 	addr := BindingAddress()
@@ -182,18 +180,18 @@ func BindingAddress() string {
 }
 
 func LogFile() string {
-	switch env := os.Getenv("LOGFILE"); env {
+	switch env := os.Getenv("LOG_DIR"); env {
 	case "":
-		return path.Join(Home(), "/log/capi.log")
+		return path.Join(Home(), "/logs/capi.log")
 	default:
-		return env
+		return path.Join(env, "capi.log")
 	}
 }
 
 func LogLevel() log.Level {
 	switch lvl := os.Getenv("LOGLEVEL"); lvl {
 	case "":
-		return log.TraceLevel
+		return log.InfoLevel
 	default:
 		level, err := log.ParseLevel(lvl)
 		if err != nil {
