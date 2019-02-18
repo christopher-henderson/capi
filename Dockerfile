@@ -1,12 +1,11 @@
-############################
-# STEP 1 build executable binary
-############################
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
 FROM golang:latest AS buildStage
 
 WORKDIR /opt
 COPY . .
-#ENV GOOS=linux
-#ENV GOARCH=amd64
 # This is necessary to statically compile all
 # C libraries into the executable. Otherwise
 # the Alpine installation will fail out with
@@ -17,9 +16,6 @@ RUN apt-get update
 RUN apt-get install -y libnss3-tools
 RUN go test ./... && go build capi.go
 
-############################
-# STEP 2 build a small image
-############################
 FROM alpine:latest
 
 RUN apk add nss-tools bash
