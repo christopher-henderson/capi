@@ -13,9 +13,11 @@ import (
 )
 
 type TestWebsiteResult struct {
-	SubjectURL string
-	Chain      ChainResult
-	Error      string
+	SubjectURL  string
+	Expectation string
+	Chain       ChainResult
+	Opinion     Opinion
+	Error       string
 }
 
 type ChainResult struct {
@@ -24,9 +26,29 @@ type ChainResult struct {
 	Root          CertificateResult
 }
 
+type Opinion struct {
+	Bad      bool // Whether this opinion thinks the run is bad in some way.
+	Errors   []Concern
+	Warnings []Concern
+	Info     []Concern
+}
+
+func (o *Opinion) Append(other Opinion) {
+	o.Errors = append(o.Errors, other.Errors...)
+	o.Warnings = append(o.Warnings, other.Warnings...)
+	o.Info = append(o.Info, other.Info...)
+}
+
+type Concern struct {
+	Raw            string // The raw response from, say, the OCSP or certutil tools
+	Interpretation string // What this tool thinks is wrong.
+	Advise         string // Any advise for troubleshooting
+}
+
 type CertificateResult struct {
 	*x509.Certificate `json:"-"`
 	Fingerprint       string
+	CrtSh             string
 	CommonName        string
 	OCSP              []ocsp.OCSP
 	CRL               []crl.CRL
@@ -37,6 +59,7 @@ func NewCeritifcateResult(certificate *x509.Certificate, ocspResonse []ocsp.OCSP
 	return CertificateResult{
 		certificate,
 		certificateUtils.FingerprintOf(certificate),
+		"https://crt.sh/?q=" + certificateUtils.FingerprintOf(certificate),
 		certificate.Subject.CommonName,
 		ocspResonse,
 		crlStatus,

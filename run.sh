@@ -39,3 +39,4 @@ docker run \
     -e "MAX_LOG_AGE=${MAX_LOG_AGE}" \
     -e "MAX_LOG_BACKUPS=${MAX_LOG_BACKUPS}" \
     capi
+

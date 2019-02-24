@@ -1,6 +1,6 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+* License, v. 2.0. If a copy of the MPL was not distributed with this
+* file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 package main // import "github.com/mozilla/capi"
 
@@ -20,14 +20,34 @@ import (
 	"net"
 	"net/http"
 	"net/http/httputil"
+	"net/url"
 	"os"
 	"path"
 	"strconv"
+	"strings"
+
+	"github.com/throttled/throttled"
+	"github.com/throttled/throttled/store/memstore"
 )
 
 func main() {
 	InitLogging()
-	http.HandleFunc("/", verify)
+	store, err := memstore.New(65536)
+	if err != nil {
+		log.Fatal(err)
+	}
+	// 100 per minute, with a burst of 6.
+	quota := throttled.RateQuota{MaxRate: throttled.PerMin(100), MaxBurst: 6}
+	rateLimiter, err := throttled.NewGCRARateLimiter(store, quota)
+	if err != nil {
+		log.Fatal(err)
+	}
+	httpRateLimiter := throttled.HTTPRateLimiter{
+		RateLimiter: rateLimiter,
+		VaryBy:      &throttled.VaryBy{Path: true},
+	}
+	rateLimitedHandler := httpRateLimiter.RateLimit(http.HandlerFunc(verify))
+	http.Handle("/", rateLimitedHandler)
 	port := Port()
 	addr := BindingAddress()
 	log.WithFields(log.Fields{"Binding Address": addr, "Port": port}).Info("Starting server")
@@ -74,14 +94,22 @@ func verify(resp http.ResponseWriter, req *http.Request) {
 	dump, err := httputil.DumpRequest(req, false)
 	if err != nil {
 		responseCode = http.StatusBadGateway
-		response = "a fatal internal error occured, " + err.Error()
+		response = "a fatal internal error occurred, " + err.Error()
 		return
 	}
 	log.WithField("Request", string(dump)).Info("Received request")
-	s, ok := req.URL.Query()["subject"]
+	log.Info(req.URL.RawQuery)
+	query, err := url.ParseQuery(req.URL.RawQuery)
+	log.Info(req.ParseForm())
+	if err != nil {
+		responseCode = http.StatusBadRequest
+		response = "malformed query string, " + err.Error()
+		return
+	}
+	s, ok := query["subject"]
 	if !ok {
 		responseCode = http.StatusBadRequest
-		response = "'subject' query parameter is required\n"
+		response = "'subject' query parameter is required"
 		return
 	}
 	if len(s) == 0 {
@@ -90,12 +118,34 @@ func verify(resp http.ResponseWriter, req *http.Request) {
 		return
 	}
 	subject := s[0]
+	if !strings.HasPrefix(subject, "https://") {
+		subject = "https://" + subject
+	}
 	rawRoot, err := ioutil.ReadAll(req.Body)
 	if err != nil {
 		responseCode = http.StatusBadRequest
 		response = "failed to read request body, " + err.Error()
 		return
 	}
+	e, ok := query["expect"]
+	interpretation := service.None
+	log.Info(e)
+	if ok {
+		if len(e) == 0 {
+			responseCode = http.StatusBadRequest
+			response = "'expect' query parameter may not be empty"
+			return
+		}
+		switch strings.ToLower(e[0]) {
+		case "valid":
+			interpretation = service.Valid
+		case "expired":
+			interpretation = service.Expired
+		case "revoked":
+			interpretation = service.Revoked
+		}
+	}
+	log.Info("Expectation is " + strconv.Itoa(int(interpretation)))
 	if err := req.Body.Close(); err != nil {
 		responseCode = http.StatusBadGateway
 		response = "failed to close the request body, " + err.Error()
@@ -125,7 +175,7 @@ func verify(resp http.ResponseWriter, req *http.Request) {
 		return
 	}
 	// Now we can begin our actual work of tattling on the CA.
-	result := model.TestWebsiteResult{SubjectURL: subject}
+	result := model.TestWebsiteResult{SubjectURL: subject, Expectation: interpretation.String()}
 	defer func() {
 		switch r, err := json.MarshalIndent(result, "", "    "); err != nil {
 		case true:
@@ -141,6 +191,7 @@ func verify(resp http.ResponseWriter, req *http.Request) {
 		// Leave this as a 200 as the remote CA test website not responding
 		// is a perfectly valid piece of information to report.
 		result.Error = err.Error()
+		result.Opinion.Bad = true
 		return
 	}
 	// The test website may include a trust anchor. If it does, then swap it out with
@@ -148,6 +199,7 @@ func verify(resp http.ResponseWriter, req *http.Request) {
 	chain = certificateUtils.EmplaceRoot(chain, root)
 	// And, finally, fill out chain verification information.
 	result.Chain = service.VerifyChain(chain)
+	service.InterpretResult(&result, interpretation)
 }
 
 func Home() string {
