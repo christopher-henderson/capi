@@ -9,11 +9,15 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"github.com/mozilla/capi/lib/ccadb"
 	"github.com/mozilla/capi/lib/certificateUtils"
+	"github.com/mozilla/capi/lib/expiration/certutil"
 	"github.com/mozilla/capi/lib/model"
 	"github.com/mozilla/capi/lib/service"
 	"github.com/natefinch/lumberjack"
 	log "github.com/sirupsen/logrus"
+	"github.com/throttled/throttled"
+	"github.com/throttled/throttled/store/memstore"
 	"golang.org/x/crypto/ssh/terminal"
 	"io"
 	"io/ioutil"
@@ -25,9 +29,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
-
-	"github.com/throttled/throttled"
-	"github.com/throttled/throttled/store/memstore"
+	"sync"
 )
 
 func main() {
@@ -37,7 +39,7 @@ func main() {
 		log.Fatal(err)
 	}
 	// 100 per minute, with a burst of 6.
-	quota := throttled.RateQuota{MaxRate: throttled.PerMin(100), MaxBurst: 6}
+	quota := throttled.RateQuota{MaxRate: throttled.PerMin(500), MaxBurst: 24}
 	rateLimiter, err := throttled.NewGCRARateLimiter(store, quota)
 	if err != nil {
 		log.Fatal(err)
@@ -46,8 +48,10 @@ func main() {
 		RateLimiter: rateLimiter,
 		VaryBy:      &throttled.VaryBy{Path: true},
 	}
-	rateLimitedHandler := httpRateLimiter.RateLimit(http.HandlerFunc(verify))
-	http.Handle("/", rateLimitedHandler)
+	verifyLimiter := httpRateLimiter.RateLimit(http.HandlerFunc(verify))
+	verifyCCADBLimiter := httpRateLimiter.RateLimit(http.HandlerFunc(verifyFromCCADB))
+	http.Handle("/", verifyLimiter)
+	http.Handle("/fromreport", verifyCCADBLimiter)
 	port := Port()
 	addr := BindingAddress()
 	log.WithFields(log.Fields{"Binding Address": addr, "Port": port}).Info("Starting server")
@@ -63,10 +67,10 @@ func verify(resp http.ResponseWriter, req *http.Request) {
 	var response string
 	var responseCode = http.StatusOK
 	defer func() {
-		//if err := recover(); err != nil {
-		//	responseCode = http.StatusBadGateway
-		//	response = fmt.Sprintf("a fatal error has occured\n%s", err)
-		//}
+		if err := recover(); err != nil {
+			responseCode = http.StatusBadGateway
+			response = fmt.Sprintf("a fatal error has occured\n%s", err)
+		}
 		switch responseCode {
 		case http.StatusBadGateway:
 			log.Fatal(string(response))
@@ -200,6 +204,137 @@ func verify(resp http.ResponseWriter, req *http.Request) {
 	// And, finally, fill out chain verification information.
 	result.Chain = service.VerifyChain(chain)
 	service.InterpretResult(&result, interpretation)
+	go SaveChainIfBad(result)
+}
+
+func verifyFromCCADB(resp http.ResponseWriter, req *http.Request) {
+	report, err := ccadb.NewReport()
+	if err != nil {
+		resp.WriteHeader(500)
+		resp.Write([]byte(err.Error()))
+		return
+	}
+	ret := make(chan model.TestWebsiteResult, 30)
+	work := make(chan ccadb.Record, len(report.Records))
+	for _, record := range report.Records {
+		work <- record
+	}
+	close(work)
+	wg := sync.WaitGroup{}
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for record := range work {
+				root := record.Root()
+				ret <- test(record.TestWebsiteValid(), root, service.Valid)
+				ret <- test(record.TestWebsiteExpired(), root, service.Expired)
+				ret <- test(record.TestWebsiteRevoked(), root, service.Revoked)
+			}
+		}()
+	}
+	go func() {
+		wg.Wait()
+		close(ret)
+	}()
+	resp.Write([]byte{'['})
+	jsonResp := json.NewEncoder(resp)
+	jsonResp.SetIndent("", "    ")
+	// Because some OCSP responders are returning HTML
+	jsonResp.SetEscapeHTML(true)
+	i := 0
+	for answer := range ret {
+		i++
+		jsonResp.Encode(answer)
+		if i < len(report.Records)*3 {
+			resp.Write([]byte{','})
+		}
+		if flusher, ok := resp.(http.Flusher); ok {
+			flusher.Flush()
+		}
+	}
+	resp.Write([]byte{']'})
+}
+
+func test(subject string, root *x509.Certificate, expectation service.Expectation) (result model.TestWebsiteResult) {
+	result.SubjectURL = subject
+	result.Expectation = expectation.String()
+	// Reach out to the test website on a plain GET and extract the certificate chain from the request.
+	chain, err := certificateUtils.GatherCertificateChain(subject)
+	if err != nil {
+		// Leave this as a 200 as the remote CA test website not responding
+		// is a perfectly valid piece of information to report.
+		result.Error = err.Error()
+		result.Opinion.Bad = true
+		return
+	}
+	// The test website may include a trust anchor. If it does, then swap it out with
+	// the one our client wants to use, if not just tack our client's trust anchor onto the end.
+	chain = certificateUtils.EmplaceRoot(chain, root)
+	// And, finally, fill out chain verification information.
+	result.Chain = service.VerifyChain(chain)
+	service.InterpretResult(&result, expectation)
+	return
+}
+
+func SaveChainIfBad(result model.TestWebsiteResult) {
+	if !result.Opinion.Bad {
+		return
+	}
+	for _, err := range result.Opinion.Errors {
+		var dirname string
+		switch strings.Contains(err.Raw, certutil.ISSUER_UNKOWN) {
+		case true:
+			dirname = path.Join("dammit", result.Chain.Root.Fingerprint)
+		case false:
+			dirname = path.Join("yay", result.Chain.Root.Fingerprint)
+		}
+		writechain(dirname, result)
+		f2, err := os.Create(path.Join(dirname, result.Expectation+"_result"))
+		if err != nil {
+			log.Panicln(err)
+			return
+		}
+		defer f2.Close()
+		enc := json.NewEncoder(f2)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(result); err != nil {
+			log.Panicln(err)
+		}
+	}
+}
+
+func writechain(dirname string, result model.TestWebsiteResult) {
+	if err := os.MkdirAll(dirname, 0777); err != nil {
+		log.Error(err)
+		return
+	}
+	f, err := os.Create(path.Join(dirname, result.Expectation))
+	if err != nil {
+		log.Panicln(err)
+		return
+	}
+	defer f.Close()
+	for _, inter := range result.Chain.Intermediates {
+		if err := pem.Encode(f, &pem.Block{"CERTIFICATE", nil, inter.Certificate.Raw}); err != nil {
+			log.Panicln(err)
+			return
+		}
+	}
+	if err := pem.Encode(f, &pem.Block{"CERTIFICATE", nil, result.Chain.Leaf.Certificate.Raw}); err != nil {
+		log.Panicln(err)
+		return
+	}
+	rootf, err := os.Create(path.Join(dirname, result.Expectation+"_root"))
+	if err != nil {
+		log.Panicln(err)
+		return
+	}
+	defer rootf.Close()
+	if err := pem.Encode(rootf, &pem.Block{"CERTIFICATE", nil, result.Chain.Root.Certificate.Raw}); err != nil {
+		log.Panicln(err)
+		return
+	}
 }
 
 func Home() string {

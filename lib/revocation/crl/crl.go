@@ -6,6 +6,7 @@ package crl
 
 import (
 	"crypto/x509"
+	"fmt"
 	"github.com/pkg/errors"
 	"io/ioutil"
 	"math/big"
@@ -53,13 +54,17 @@ func allAgree(statuses []CRL) error {
 }
 
 func newCRL(serialNumber *big.Int, distributionPoint string) (crl CRL) {
-	raw, err := http.Get(distributionPoint)
 	crl.Endpoint = distributionPoint
+	raw, err := http.Get(distributionPoint)
 	if err != nil {
 		crl.Error = errors.Wrapf(err, "failed to retrieve CRL from distribution point %v", distributionPoint).Error()
 		return
 	}
 	defer raw.Body.Close()
+	if raw.StatusCode != http.StatusOK {
+		crl.Error = errors.New(fmt.Sprintf("wanted 200 response, got %s", raw.StatusCode)).Error()
+		return
+	}
 	b, err := ioutil.ReadAll(raw.Body)
 	if err != nil {
 		crl.Error = errors.Wrapf(err, "failed to read response from CRL distribution point %v", distributionPoint).Error()

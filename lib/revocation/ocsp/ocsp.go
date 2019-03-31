@@ -9,9 +9,11 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"github.com/pkg/errors"
-	"golang.org/x/crypto/ocsp"
+	ocsplib "golang.org/x/crypto/ocsp"
+	"golang.org/x/net/html"
 	"io/ioutil"
 	"net/http"
+	"strings"
 )
 
 // RFC 6960
@@ -57,6 +59,7 @@ const (
 	Good = iota
 	Revoked
 	Unknown
+	Unauthorized
 )
 
 type OCSP struct {
@@ -109,6 +112,8 @@ func FromString(data string) (OCSPStatus, error) {
 		return Revoked, nil
 	case `unknown`:
 		return Unknown, nil
+	case `unauthorized`:
+		return Unauthorized, nil
 	default:
 		return Unknown, errors.New("unknown OCSPStatus type " + string(data))
 	}
@@ -122,6 +127,8 @@ func (o OCSPStatus) String() string {
 		return `revoked`
 	case Unknown:
 		return `unknown`
+	case Unauthorized:
+		return `unauthorized`
 	default:
 		return `"error_unknown_ocsp_status"`
 	}
@@ -151,12 +158,19 @@ func queryOCSP(certificate, issuer *x509.Certificate) []OCSP {
 
 func newOCSPResponse(certificate, issuer *x509.Certificate, responder string) (response OCSP) {
 	response.Responder = responder
-	req, err := ocsp.CreateRequest(certificate, issuer, nil)
+	req, err := ocsplib.CreateRequest(certificate, issuer, nil)
 	if err != nil {
 		response.Error = errors.Wrap(err, "failed to create DER encoded OCSP request").Error()
 		return
 	}
-	ret, err := http.Post(responder, OCSPContentType, bytes.NewReader(req))
+	r, err := http.NewRequest("POST", responder, bytes.NewReader(req))
+	if err != nil {
+		response.Error = errors.Wrap(err, "failed to create HTTP POST for OCSP request").Error()
+		return
+	}
+	r.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.14; rv:64.0) Gecko/20100101 Firefox/64.0")
+	r.Header.Set("Content-Type", OCSPContentType)
+	ret, err := http.DefaultClient.Do(r)
 	if err != nil {
 		response.Error = errors.Wrapf(err, "failed to retrieve HTTP POST response from %v", responder).Error()
 		return
@@ -167,17 +181,26 @@ func newOCSPResponse(certificate, issuer *x509.Certificate, responder string) (r
 		response.Error = err.Error()
 		return
 	}
-	serverResponse, err := ocsp.ParseResponse(httpResp, issuer)
+	serverResponse, err := ocsplib.ParseResponse(httpResp, issuer)
 	if err != nil {
-		response.Error = err.Error()
+		if strings.Contains(err.Error(), `unauthorized`) {
+			response.Status = Unauthorized
+			return
+		}
+		_, inner_err := html.Parse(strings.NewReader(string(httpResp)))
+		if inner_err == nil {
+			response.Error = string(httpResp)
+		} else {
+			response.Error = err.Error()
+		}
 		return
 	}
 	switch serverResponse.Status {
-	case ocsp.Revoked:
+	case ocsplib.Revoked:
 		response.Status = Revoked
-	case ocsp.Good:
+	case ocsplib.Good:
 		response.Status = Good
-	case ocsp.Unknown:
+	case ocsplib.Unknown:
 		response.Status = Unknown
 	}
 	return

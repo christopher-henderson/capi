@@ -5,8 +5,14 @@
 package ocsp
 
 import (
+	"bytes"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"github.com/mozilla/capi/lib/certificateUtils"
+	"golang.org/x/crypto/ocsp"
+	"io/ioutil"
+	"net/http"
 	"testing"
 )
 
@@ -330,4 +336,57 @@ func TestUnmarshaling(t *testing.T) {
 	if r.Status != Unknown {
 		t.Errorf("expected Unknown, got %v", r.Status)
 	}
+}
+
+func TestUnauthorized(t *testing.T) {
+	subject := "https://revoked.identrustssl.com/"
+	chain, err := certificateUtils.GatherCertificateChain(subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Log(chain)
+	resp := VerifyChain(chain)
+	for _, i := range resp {
+		for _, j := range i {
+			t.Log(j.Error)
+		}
+	}
+}
+
+const badASN1URL = `https://global-root-ca-expired.chain-demos.digicert.com/`
+
+func TestBadASN1(t *testing.T) {
+	chain, err := certificateUtils.GatherCertificateChain(badASN1URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := bytes.NewBuffer([]byte{})
+	pem.Encode(s, &pem.Block{"CERTIFICATE", nil, chain[0].Raw})
+	t.Log(s.String())
+	b := responseAsBytes(chain[0], chain[1], chain[0].OCSPServer[0])
+	t.Log(chain[0].OCSPServer[0])
+	t.Log(string(b))
+}
+
+func responseAsBytes(certificate, issuer *x509.Certificate, responder string) []byte {
+	req, err := ocsp.CreateRequest(certificate, issuer, nil)
+	if err != nil {
+		panic(err)
+	}
+	r, err := http.NewRequest("POST", responder, bytes.NewReader(req))
+	if err != nil {
+		panic(err)
+	}
+	r.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.14; rv:64.0) Gecko/20100101 Firefox/64.0")
+	r.Header.Set("Content-Type", OCSPContentType)
+	ret, err := http.DefaultClient.Do(r)
+	if err != nil {
+		panic(err)
+	}
+	defer ret.Body.Close()
+	httpResp, err := ioutil.ReadAll(ret.Body)
+	if err != nil {
+		panic(err)
+	}
+	return httpResp
 }
