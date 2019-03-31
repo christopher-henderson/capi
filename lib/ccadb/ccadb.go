@@ -1,6 +1,7 @@
 package ccadb
 
 import (
+	"crypto/tls"
 	"crypto/x509"
 	"encoding/csv"
 	"encoding/pem"
@@ -93,12 +94,14 @@ func NewReport() (Report, error) {
 }
 
 func NewReportFrom(url string) (report Report, err error) {
+	transport := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
+	client := &http.Client{Transport: transport}
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return
 	}
 	req.Header.Add("X-TOOL", "github.com/christopher-henderson/capi")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return
 	}

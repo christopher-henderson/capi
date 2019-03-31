@@ -14,7 +14,7 @@ COPY . .
 ENV CGO_ENABLED=0
 RUN apt-get update
 RUN apt-get install -y libnss3-tools
-RUN go test ./... && go build capi.go
+RUN go test ./lib/... && go build capi.go
 
 FROM alpine:latest
 

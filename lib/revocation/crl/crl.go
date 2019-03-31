@@ -11,6 +11,7 @@ import (
 	"io/ioutil"
 	"math/big"
 	"net/http"
+	"time"
 )
 
 type CRL struct {
@@ -55,14 +56,17 @@ func allAgree(statuses []CRL) error {
 
 func newCRL(serialNumber *big.Int, distributionPoint string) (crl CRL) {
 	crl.Endpoint = distributionPoint
-	raw, err := http.Get(distributionPoint)
+	req, err := http.NewRequest("GET", distributionPoint, nil)
+	client := http.Client{}
+	client.Timeout = time.Duration(10 * time.Second)
+	raw, err := client.Do(req)
 	if err != nil {
 		crl.Error = errors.Wrapf(err, "failed to retrieve CRL from distribution point %v", distributionPoint).Error()
 		return
 	}
 	defer raw.Body.Close()
 	if raw.StatusCode != http.StatusOK {
-		crl.Error = errors.New(fmt.Sprintf("wanted 200 response, got %s", raw.StatusCode)).Error()
+		crl.Error = errors.New(fmt.Sprintf("wanted 200 response, got %d", raw.StatusCode)).Error()
 		return
 	}
 	b, err := ioutil.ReadAll(raw.Body)

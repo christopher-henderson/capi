@@ -14,6 +14,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // RFC 6960
@@ -170,7 +171,9 @@ func newOCSPResponse(certificate, issuer *x509.Certificate, responder string) (r
 	}
 	r.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.14; rv:64.0) Gecko/20100101 Firefox/64.0")
 	r.Header.Set("Content-Type", OCSPContentType)
-	ret, err := http.DefaultClient.Do(r)
+	client := http.Client{}
+	client.Timeout = time.Duration(10 * time.Second)
+	ret, err := client.Do(r)
 	if err != nil {
 		response.Error = errors.Wrapf(err, "failed to retrieve HTTP POST response from %v", responder).Error()
 		return
