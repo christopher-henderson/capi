@@ -10,24 +10,14 @@ import (
 	"github.com/pkg/errors"
 )
 
-type Status int
+type Status string
 
 const (
-	Valid Status = iota
-	Expired
-	IssuerUnknown
-
-	UnexpectedResponse
+	Valid              Status = "valid"
+	Expired                   = "expired"
+	IssuerUnknown             = "issuerUnknown"
+	UnexpectedResponse        = "unexpectedResponse"
 )
-
-func (s Status) MarshalJSON(v interface{}) ([]byte, error) {
-	return map[Status][]byte{
-		Valid:              []byte("valid"),
-		Expired:            []byte("expired"),
-		IssuerUnknown:      []byte("issuerUnknown"),
-		UnexpectedResponse: []byte("unexpected response, please see the Raw field"),
-	}[s], nil
-}
 
 func toStatus(nssResponse string) (Status, bool) {
 	status, ok := map[string]Status{

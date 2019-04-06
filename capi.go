@@ -208,6 +208,12 @@ func verify(resp http.ResponseWriter, req *http.Request) {
 }
 
 func verifyFromCCADB(resp http.ResponseWriter, req *http.Request) {
+	defer func() {
+		if err := recover(); err != nil {
+			log.Error(err)
+		}
+		log.Info("dunnnn")
+	}()
 	report, err := ccadb.NewReport()
 	if err != nil {
 		resp.WriteHeader(500)
@@ -241,7 +247,7 @@ func verifyFromCCADB(resp http.ResponseWriter, req *http.Request) {
 	jsonResp := json.NewEncoder(resp)
 	jsonResp.SetIndent("", "    ")
 	// Because some OCSP responders are returning HTML
-	jsonResp.SetEscapeHTML(true)
+	//jsonResp.SetEscapeHTML(true)
 	i := 0
 	for answer := range ret {
 		i++
@@ -259,6 +265,9 @@ func verifyFromCCADB(resp http.ResponseWriter, req *http.Request) {
 func test(subject string, root *x509.Certificate, expectation service.Expectation) (result model.TestWebsiteResult) {
 	result.SubjectURL = subject
 	result.Expectation = expectation.String()
+	if subject == "" {
+		return
+	}
 	// Reach out to the test website on a plain GET and extract the certificate chain from the request.
 	chain, err := certificateUtils.GatherCertificateChain(subject)
 	if err != nil {

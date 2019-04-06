@@ -11,6 +11,7 @@ import (
 	"io/ioutil"
 	"math/big"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -56,6 +57,9 @@ func allAgree(statuses []CRL) error {
 
 func newCRL(serialNumber *big.Int, distributionPoint string) (crl CRL) {
 	crl.Endpoint = distributionPoint
+	if strings.HasPrefix(distributionPoint, "ldap") {
+		return
+	}
 	req, err := http.NewRequest("GET", distributionPoint, nil)
 	client := http.Client{}
 	client.Timeout = time.Duration(10 * time.Second)

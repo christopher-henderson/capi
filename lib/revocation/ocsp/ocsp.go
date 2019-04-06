@@ -8,11 +8,12 @@ import (
 	"bytes"
 	"crypto/x509"
 	"encoding/json"
+	"fmt"
 	"github.com/pkg/errors"
 	ocsplib "golang.org/x/crypto/ocsp"
-	"golang.org/x/net/html"
 	"io/ioutil"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -61,6 +62,9 @@ const (
 	Revoked
 	Unknown
 	Unauthorized
+
+	CryptoVerifcationError
+	BadResponse
 )
 
 type OCSP struct {
@@ -175,25 +179,27 @@ func newOCSPResponse(certificate, issuer *x509.Certificate, responder string) (r
 	client.Timeout = time.Duration(10 * time.Second)
 	ret, err := client.Do(r)
 	if err != nil {
+		response.Status = BadResponse
 		response.Error = errors.Wrapf(err, "failed to retrieve HTTP POST response from %v", responder).Error()
 		return
 	}
 	defer ret.Body.Close()
 	httpResp, err := ioutil.ReadAll(ret.Body)
 	if err != nil {
+		response.Status = BadResponse
 		response.Error = err.Error()
 		return
 	}
 	serverResponse, err := ocsplib.ParseResponse(httpResp, issuer)
 	if err != nil {
-		if strings.Contains(err.Error(), `unauthorized`) {
+		switch true {
+		case strings.Contains(err.Error(), `unauthorized`):
 			response.Status = Unauthorized
-			return
-		}
-		_, inner_err := html.Parse(strings.NewReader(string(httpResp)))
-		if inner_err == nil {
-			response.Error = string(httpResp)
-		} else {
+		case itLooksLikeHTML(httpResp):
+			response.Status = BadResponse
+			response.Error = fmt.Sprintf("Response appears to be HTML. Error: %s", err.Error())
+		default:
+			response.Status = BadResponse
 			response.Error = err.Error()
 		}
 		return
@@ -207,4 +213,10 @@ func newOCSPResponse(certificate, issuer *x509.Certificate, responder string) (r
 		response.Status = Unknown
 	}
 	return
+}
+
+var HTMLish = regexp.MustCompile(`(<html>|<body>)`)
+
+func itLooksLikeHTML(response []byte) bool {
+	return HTMLish.Match(response)
 }

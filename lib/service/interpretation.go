@@ -98,31 +98,6 @@ func InterpretResult(result *model.TestWebsiteResult, expectation Expectation) {
 	}
 }
 
-//// These are errors
-//func rootRevocation(result *model.TestWebsiteResult) {
-//	opinion := assertNoRevocationIssues(result.Chain.Root, Root, Valid)
-//	result.Opinion.Append(opinion)
-//}
-//
-//func rootExpiration(result *model.TestWebsiteResult) {
-//	opinion := assertNoExpirationIssues(result.Chain.Root, Root)
-//	result.Opinion.Append(opinion)
-//}
-//
-//func intermediateRevocation(result *model.TestWebsiteResult) {
-//	for _, intermediate := range result.Chain.Intermediates {
-//		opinion := assertNoRevocationIssues(intermediate, Intermediate, Valid)
-//		result.Opinion.Append(opinion)
-//	}
-//}
-//
-//func intermediateExpriation(result *model.TestWebsiteResult) {
-//	for _, intermediate := range result.Chain.Intermediates {
-//		opinion := assertNoExpirationIssues(intermediate, Intermediate)
-//		result.Opinion.Append(opinion)
-//	}
-//}
-
 type CertType string
 
 const (
@@ -133,10 +108,6 @@ const (
 
 func assertNotRevoked(cert model.CertificateResult, t CertType) (opinion model.Opinion) {
 	for _, response := range cert.OCSP {
-		if strings.Contains(response.Error, "unsupported protocol scheme \"ldap\"") {
-			log.Error(response.Error)
-			continue
-		}
 		if cert.Expiration.Status == expiration.Expired && response.Status == ocsp.Unauthorized && t != Root {
 			continue
 		}

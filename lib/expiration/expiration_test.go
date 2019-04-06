@@ -6,6 +6,7 @@ package expiration
 
 import (
 	"crypto/x509"
+	"encoding/json"
 	"github.com/mozilla/capi/lib/certificateUtils"
 	"testing"
 )
@@ -316,6 +317,8 @@ func TestValidChain(t *testing.T) {
 			t.Fail()
 			t.Errorf("wanted the leaf to be unexpired, valid, and with a know issuer, got %v", status)
 		}
+		s, _ := json.Marshal(status)
+		t.Log(string(s))
 	}
 }
 
