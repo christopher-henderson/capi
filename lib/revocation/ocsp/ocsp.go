@@ -65,6 +65,8 @@ const (
 
 	CryptoVerifcationError
 	BadResponse
+
+	InternalError
 )
 
 type OCSP struct {
@@ -119,6 +121,10 @@ func FromString(data string) (OCSPStatus, error) {
 		return Unknown, nil
 	case `unauthorized`:
 		return Unauthorized, nil
+	case `badResponse`:
+		return BadResponse, nil
+	case `internalError`:
+		return InternalError, nil
 	default:
 		return Unknown, errors.New("unknown OCSPStatus type " + string(data))
 	}
@@ -134,6 +140,12 @@ func (o OCSPStatus) String() string {
 		return `unknown`
 	case Unauthorized:
 		return `unauthorized`
+	case BadResponse:
+		return `badResponse`
+	case CryptoVerifcationError:
+		return `cryptoVerificationError`
+	case InternalError:
+		return `internalError`
 	default:
 		return `"error_unknown_ocsp_status"`
 	}
@@ -165,11 +177,13 @@ func newOCSPResponse(certificate, issuer *x509.Certificate, responder string) (r
 	response.Responder = responder
 	req, err := ocsplib.CreateRequest(certificate, issuer, nil)
 	if err != nil {
+		response.Status = InternalError
 		response.Error = errors.Wrap(err, "failed to create DER encoded OCSP request").Error()
 		return
 	}
 	r, err := http.NewRequest("POST", responder, bytes.NewReader(req))
 	if err != nil {
+		response.Status = InternalError
 		response.Error = errors.Wrap(err, "failed to create HTTP POST for OCSP request").Error()
 		return
 	}
@@ -195,6 +209,9 @@ func newOCSPResponse(certificate, issuer *x509.Certificate, responder string) (r
 		switch true {
 		case strings.Contains(err.Error(), `unauthorized`):
 			response.Status = Unauthorized
+		case strings.Contains(err.Error(), `verification error`):
+			response.Error = err.Error()
+			response.Status = CryptoVerifcationError
 		case itLooksLikeHTML(httpResp):
 			response.Status = BadResponse
 			response.Error = fmt.Sprintf("Response appears to be HTML. Error: %s", err.Error())
