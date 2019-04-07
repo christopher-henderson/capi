@@ -6,8 +6,6 @@ import (
 	"github.com/mozilla/capi/lib/model"
 	"github.com/mozilla/capi/lib/revocation/crl"
 	"github.com/mozilla/capi/lib/revocation/ocsp"
-	log "github.com/sirupsen/logrus"
-	"strings"
 )
 
 type Expectation int
@@ -112,36 +110,37 @@ func assertNotRevoked(cert model.CertificateResult, t CertType) (opinion model.O
 		if cert.Expiration.Status == expiration.Expired && response.Status == ocsp.Unauthorized && t != Root {
 			continue
 		}
-		if response.Status != ocsp.Good {
-			opinion.Errors = append(opinion.Errors, model.Concern{
-				Raw: "",
-				Interpretation: fmt.Sprintf(
-					"Got OCSP response %s, wanted %s. OCSP responder was %s.Fingerprint %s",
-					response.Status.String(), "good", response.Responder, cert.Fingerprint),
-				Advise: cert.CrtSh,
-			})
-		}
 		if response.Error != "" {
+			interpretation := ""
+			switch response.Status {
+			case ocsp.CryptoVerifcationError:
+				interpretation = fmt.Sprintf("OCSP responder %s could not verify the provided chain at the %s. This is usually accompanied by a verification error thrown by certutil.", response.Responder, t)
+			case ocsp.BadResponse:
+				interpretation = fmt.Sprintf("OCSP responder %s gave a bad response for the %s.", response.Responder, t)
+			}
 			opinion.Errors = append(opinion.Errors, model.Concern{
 				Raw:            response.Error,
-				Interpretation: fmt.Sprintf("An error occurred while retrieving the OCSP status of the %s. This is usually a networking error", t),
-				Advise:         fmt.Sprintf(cert.CrtSh),
+				Interpretation: interpretation,
+				Advise:         cert.CrtSh,
+			})
+		} else if response.Status != ocsp.Good {
+			opinion.Errors = append(opinion.Errors, model.Concern{
+				Raw:            response.Error,
+				Interpretation: fmt.Sprintf("%s is `%s` by OCSP responder %s", t, response.Status.String(), response.Responder),
+				Advise:         cert.CrtSh,
 			})
 		}
+
 	}
 	for _, crlStatus := range cert.CRL {
-		if strings.Contains(crlStatus.Error, "unsupported protocol scheme \"ldap\"") {
-			// Silencing the bug that we haven't supported LDAP endpoints yet.
-			log.Error(crlStatus.Error)
+		if crlStatus.Status == crl.Unchecked {
 			continue
 		}
 		if crlStatus.Status == crl.Revoked {
 			opinion.Errors = append(opinion.Errors, model.Concern{
-				Raw: "",
-				Interpretation: fmt.Sprintf(
-					"CRL endpoint at %s lists the %s certificate, %s, as revoked.",
-					crlStatus.Endpoint, t, cert.Fingerprint),
-				Advise: cert.CrtSh,
+				Raw:            "",
+				Interpretation: fmt.Sprintf("%s is revoked by CRL endpoint %s", t, crlStatus.Endpoint),
+				Advise:         cert.CrtSh,
 			})
 		}
 		if crlStatus.Error != "" {
@@ -155,86 +154,6 @@ func assertNotRevoked(cert model.CertificateResult, t CertType) (opinion model.O
 	return
 }
 
-//func assertNoRevocationIssues(cert model.CertificateResult, t CertType, e Expectation) (opinion model.Opinion) {
-//	for _, response := range cert.OCSP {
-//		if strings.Contains(response.Error, "unsupported protocol scheme \"ldap\"") {
-//			log.Error(response.Error)
-//			continue
-//		}
-//		if e == Expired && response.Status == ocsp.Unauthorized {
-//			continue
-//		}
-//		if response.Status != ocsp.Good {
-//			opinion.Errors = append(opinion.Errors, model.Concern{
-//				Raw: "",
-//				Interpretation: fmt.Sprintf(
-//					"OCSP responder %s does not believe that the %s certificate, %s, is good. Result was %s",
-//					response.Responder, t, cert.Fingerprint, response.Status.String()),
-//				Advise: cert.CrtSh,
-//			})
-//		}
-//		if response.Error != "" {
-//			opinion.Errors = append(opinion.Errors, model.Concern{
-//				Raw:            response.Error,
-//				Interpretation: fmt.Sprintf("An error occurred while retrieving the OCSP status of the %s. This is usually a networking error", t),
-//				Advise:         fmt.Sprintf("If this is a networking error, attempt to verify that OCSP responder at %s is active and available", response.Responder),
-//			})
-//		}
-//	}
-//	for _, crlStatus := range cert.CRL {
-//		if strings.Contains(crlStatus.Error, "unsupported protocol scheme \"ldap\"") {
-//			// Silencing the bug that we haven't supported LDAP endpoints yet.
-//			log.Error(crlStatus.Error)
-//			continue
-//		}
-//		if crlStatus.Revoked {
-//			opinion.Errors = append(opinion.Errors, model.Concern{
-//				Raw: "",
-//				Interpretation: fmt.Sprintf(
-//					"CRL endpoint at %s lists the %s certificate, %s, as revoked.",
-//					crlStatus.Endpoint, t, cert.Fingerprint),
-//				Advise: cert.CrtSh,
-//			})
-//		}
-//		if crlStatus.Error != "" {
-//			opinion.Errors = append(opinion.Errors, model.Concern{
-//				Raw:            crlStatus.Error,
-//				Interpretation: "An error occurred while retrieving the CRL. This is usually a networking error",
-//				Advise:         fmt.Sprintf("If this is a networking error, attempt to verify that CRL endpoint at %s is active and available", crlStatus.Endpoint),
-//			})
-//		}
-//	}
-//	return
-//}
-
-//func assertNoExpirationIssues(cert model.CertificateResult, t CertType) (opinion model.Opinion) {
-//	if cert.Expiration.Status == expiration.Expired {
-//		opinion.Errors = append(opinion.Errors, model.Concern{
-//			Raw: cert.Expiration.Raw,
-//			Interpretation: fmt.Sprintf("certutil believes that the %s certificate, %s, is expired",
-//				t, cert.Fingerprint),
-//			Advise: cert.CrtSh,
-//		})
-//	}
-//	if cert.Expiration.Status == expiration.IssuerUnknown {
-//		opinion.Errors = append(opinion.Errors, model.Concern{
-//			Raw: cert.Expiration.Raw,
-//			Interpretation: fmt.Sprintf("certutil believes that the provided chain is broken for the %s certificate %s",
-//				t, cert.Fingerprint),
-//			Advise: cert.CrtSh,
-//		})
-//	}
-//	if cert.Expiration.Error != "" {
-//		opinion.Errors = append(opinion.Errors, model.Concern{
-//			Raw: cert.Expiration.Raw,
-//			Interpretation: fmt.Sprintf("certutil encountered a fatal error when attempting to verify the %s certificate, %s",
-//				t, cert.Fingerprint),
-//			Advise: "This is likely an error in CAPI",
-//		})
-//	}
-//	return
-//}
-
 func assertNotExpired(cert model.CertificateResult, t CertType) (opinion model.Opinion) {
 	if cert.Expiration.Status == expiration.Expired {
 		opinion.Errors = append(opinion.Errors, model.Concern{
@@ -245,8 +164,8 @@ func assertNotExpired(cert model.CertificateResult, t CertType) (opinion model.O
 	}
 	if cert.Expiration.Status == expiration.IssuerUnknown {
 		opinion.Errors = append(opinion.Errors, model.Concern{
-			Raw:            cert.Expiration.Error,
-			Interpretation: fmt.Sprintf("Bad chain at %s", t),
+			Raw:            cert.Expiration.Raw,
+			Interpretation: fmt.Sprintf("bad chain at %s", t),
 			Advise:         cert.CrtSh,
 		})
 	}
@@ -263,18 +182,16 @@ func assertNotExpired(cert model.CertificateResult, t CertType) (opinion model.O
 func assertExpired(cert model.CertificateResult, t CertType) (opinion model.Opinion) {
 	if cert.Expiration.Status != expiration.Expired {
 		opinion.Errors = append(opinion.Errors, model.Concern{
-			Raw: cert.Expiration.Error,
-			Interpretation: fmt.Sprintf("certutil does not believe that the %s certificate, %s, is expired",
-				t, cert.Fingerprint),
-			Advise: cert.CrtSh,
+			Raw:            cert.Expiration.Error,
+			Interpretation: fmt.Sprintf("%s is not expired", t),
+			Advise:         cert.CrtSh,
 		})
 	}
 	if cert.Expiration.Status == expiration.IssuerUnknown {
 		opinion.Errors = append(opinion.Errors, model.Concern{
-			Raw: cert.Expiration.Error,
-			Interpretation: fmt.Sprintf("certutil believes that the provided chain is broken for the %s certificate %s",
-				t, cert.Fingerprint),
-			Advise: cert.CrtSh,
+			Raw:            cert.Expiration.Raw,
+			Interpretation: fmt.Sprintf("bad chain at %s", t),
+			Advise:         cert.CrtSh,
 		})
 	}
 	if cert.Expiration.Error != "" {
@@ -291,10 +208,9 @@ func assertExpired(cert model.CertificateResult, t CertType) (opinion model.Opin
 func assertMayBeExpired(cert model.CertificateResult, t CertType) (opinion model.Opinion) {
 	if cert.Expiration.Status == expiration.IssuerUnknown {
 		opinion.Errors = append(opinion.Errors, model.Concern{
-			Raw: cert.Expiration.Error,
-			Interpretation: fmt.Sprintf("certutil believes that the provided chain is broken for the %s certificate %s",
-				t, cert.Fingerprint),
-			Advise: cert.CrtSh,
+			Raw:            cert.Expiration.Raw,
+			Interpretation: fmt.Sprintf("bad chain at %s", t),
+			Advise:         cert.CrtSh,
 		})
 	}
 	if cert.Expiration.Error != "" {
@@ -310,38 +226,43 @@ func assertMayBeExpired(cert model.CertificateResult, t CertType) (opinion model
 
 func assertRevoked(cert model.CertificateResult, t CertType) (opinion model.Opinion) {
 	for _, response := range cert.OCSP {
-		if strings.Contains(response.Error, "unsupported protocol scheme \"ldap\"") {
-			log.Error(response.Error)
+		if cert.Expiration.Status == expiration.Expired && response.Status == ocsp.Unauthorized && t != Root {
 			continue
 		}
 		if response.Status == ocsp.Revoked {
 			continue
 		}
-		opinion.Errors = append(opinion.Errors, model.Concern{
-			Raw:            response.Status.String(),
-			Interpretation: fmt.Sprintf("%s is not revoked, responder %s", t, response.Responder),
-			Advise:         cert.CrtSh,
-		})
 		if response.Error != "" {
+			interpretation := ""
+			switch response.Status {
+			case ocsp.CryptoVerifcationError:
+				interpretation = fmt.Sprintf("OCSP responder %s could not verify the provided chain at the %s. This is usually accompanied by a verification error thrown by certutil.", response.Responder, t)
+			case ocsp.BadResponse:
+				interpretation = fmt.Sprintf("OCSP responder %s gave a bad response for the %s.", response.Responder, t)
+			}
 			opinion.Errors = append(opinion.Errors, model.Concern{
 				Raw:            response.Error,
-				Interpretation: fmt.Sprintf("An error occurred while retrieving the OCSP status of the %s. This is usually a networking error", t),
-				Advise:         fmt.Sprintf("If this is a networking error, attempt to verify that OCSP responder at %s is active and available", response.Responder),
+				Interpretation: interpretation,
+				Advise:         cert.CrtSh,
+			})
+		} else {
+			opinion.Errors = append(opinion.Errors, model.Concern{
+				Raw:            response.Status.String(),
+				Interpretation: fmt.Sprintf("%s is `%s` by OCSP responder %s", t, response.Status.String(), response.Responder),
+				Advise:         cert.CrtSh,
 			})
 		}
+
 	}
 	for _, crlStatus := range cert.CRL {
-		if strings.Contains(crlStatus.Error, "unsupported protocol scheme \"ldap\"") {
-			log.Error(crlStatus.Error)
+		if crlStatus.Status == crl.Unchecked {
 			continue
 		}
 		if crlStatus.Status != crl.Revoked {
 			opinion.Errors = append(opinion.Errors, model.Concern{
-				Raw: "",
-				Interpretation: fmt.Sprintf(
-					"CRL endpoint at %s lists the %s certificate, %s, as not revoked.",
-					crlStatus.Endpoint, t, cert.Fingerprint),
-				Advise: cert.CrtSh,
+				Raw:            crlStatus.Error,
+				Interpretation: fmt.Sprintf("%s is not revoked by CRL endpoint %s", t, crlStatus.Endpoint),
+				Advise:         cert.CrtSh,
 			})
 		}
 		if crlStatus.Error != "" {
@@ -357,26 +278,25 @@ func assertRevoked(cert model.CertificateResult, t CertType) (opinion model.Opin
 
 func assertMayBeRevoked(cert model.CertificateResult, t CertType) (opinion model.Opinion) {
 	for _, response := range cert.OCSP {
-		if strings.Contains(response.Error, "unsupported protocol scheme \"ldap\"") {
-			log.Error(response.Error)
-			continue
-		}
 		if response.Status == ocsp.Revoked {
 			continue
 		}
 		if response.Error != "" {
+			interpretation := ""
+			switch response.Status {
+			case ocsp.CryptoVerifcationError:
+				interpretation = fmt.Sprintf("OCSP responder %s could not verify the provided chain at the %s. This is usually accompanied by a verification error thrown by certutil.", response.Responder, t)
+			case ocsp.BadResponse:
+				interpretation = fmt.Sprintf("OCSP responder %s gave a bad response for the %s.", response.Responder, t)
+			}
 			opinion.Errors = append(opinion.Errors, model.Concern{
 				Raw:            response.Error,
-				Interpretation: fmt.Sprintf("An error occurred while retrieving the OCSP status of the %s. This is usually a networking error", t),
-				Advise:         fmt.Sprintf("If this is a networking error, attempt to verify that OCSP responder at %s is active and available", response.Responder),
+				Interpretation: interpretation,
+				Advise:         cert.CrtSh,
 			})
 		}
 	}
 	for _, crlStatus := range cert.CRL {
-		if strings.Contains(crlStatus.Error, "unsupported protocol scheme \"ldap\"") {
-			log.Error(crlStatus.Error)
-			continue
-		}
 		if crlStatus.Error != "" {
 			opinion.Errors = append(opinion.Errors, model.Concern{
 				Raw:            crlStatus.Error,

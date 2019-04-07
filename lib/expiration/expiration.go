@@ -29,6 +29,7 @@ func toStatus(nssResponse string) (Status, bool) {
 }
 
 type ExpirationStatus struct {
+	Raw    string `json:"-"`
 	Error  string
 	Status Status
 }
@@ -59,6 +60,7 @@ func queryExpiration(certificate *x509.Certificate, c certutil.Certutil) (exps E
 	// the tool was fundamentally used wrong or if the cert is just expired or what.
 	resp, _ := c.Verify(certificate)
 	response := string(resp)
+	exps.Raw = response
 	switch status, ok := toStatus(response); ok {
 	case true:
 		exps.Status = status

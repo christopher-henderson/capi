@@ -275,6 +275,11 @@ func test(subject string, root *x509.Certificate, expectation service.Expectatio
 		// is a perfectly valid piece of information to report.
 		result.Error = err.Error()
 		result.Opinion.Bad = true
+		result.Opinion.Errors = append(result.Opinion.Errors, model.Concern{
+			Raw:            err.Error(),
+			Interpretation: "The subject test website failed to respond within 10 seconds.",
+			Advise:         "Please check that " + subject + " is up and responding in a reasonable time.",
+		})
 		return
 	}
 	// The test website may include a trust anchor. If it does, then swap it out with
