@@ -201,13 +201,13 @@ func TestRevoked(t *testing.T) {
 	crls := VerifyChain(chain)
 	leaf := crls[0]
 	for _, status := range leaf {
-		if !status.Revoked {
+		if status.Status != Revoked {
 			t.Fatalf("wanted the leaf to be revoked, got good")
 		}
 	}
 	for _, CA := range crls[1:] {
 		for _, status := range CA {
-			if status.Revoked {
+			if status.Status == Revoked {
 				t.Fatalf("wanted the intermediates and root be good, revoked")
 			}
 		}
@@ -222,13 +222,13 @@ func TestValid(t *testing.T) {
 	crls := VerifyChain(chain)
 	leaf := crls[0]
 	for _, status := range leaf {
-		if status.Revoked {
+		if status.Status == Revoked {
 			t.Fatalf("wanted the leaf to be good, got revoked")
 		}
 	}
 	for _, CA := range crls[1:] {
 		for _, status := range CA {
-			if status.Revoked {
+			if status.Status == Revoked {
 				t.Fatalf("wanted the intermediates and root be good, revoked")
 			}
 		}
@@ -243,13 +243,13 @@ func TestExpired(t *testing.T) {
 	crls := VerifyChain(chain)
 	leaf := crls[0]
 	for _, status := range leaf {
-		if status.Revoked {
+		if status.Status == Revoked {
 			t.Fatalf("wanted the leaf to be good, got revoked")
 		}
 	}
 	for _, CA := range crls[1:] {
 		for _, status := range CA {
-			if status.Revoked {
+			if status.Status == Revoked {
 				t.Fatalf("wanted the intermediates and root be good, revoked")
 			}
 		}

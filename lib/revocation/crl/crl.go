@@ -15,10 +15,19 @@ import (
 	"time"
 )
 
+type CRLStatus string
+
+const (
+	Good        CRLStatus = "good"
+	Revoked               = "revoked"
+	Unchecked             = "unchecked"
+	BadResponse           = "badResponse"
+)
+
 type CRL struct {
-	Endpoint string
-	Revoked  bool
 	Error    string
+	Endpoint string
+	Status   CRLStatus
 }
 
 func VerifyChain(chain []*x509.Certificate) [][]CRL {
@@ -46,9 +55,16 @@ func allAgree(statuses []CRL) error {
 	if len(statuses) <= 1 {
 		return nil
 	}
-	firstAnswer := statuses[0]
-	for _, otherAnswer := range statuses[1:] {
-		if otherAnswer.Revoked != firstAnswer.Revoked {
+	checkedCRLs := make([]CRL, 0)
+	for _, s := range statuses {
+		if s.Status == Unchecked {
+			continue
+		}
+		checkedCRLs = append(checkedCRLs, s)
+	}
+	firstAnswer := checkedCRLs[0]
+	for _, otherAnswer := range checkedCRLs[1:] {
+		if otherAnswer.Status != firstAnswer.Status {
 			return errors.New("The listed CRLs disagree with each other")
 		}
 	}
@@ -58,6 +74,7 @@ func allAgree(statuses []CRL) error {
 func newCRL(serialNumber *big.Int, distributionPoint string) (crl CRL) {
 	crl.Endpoint = distributionPoint
 	if strings.HasPrefix(distributionPoint, "ldap") {
+		crl.Status = Unchecked
 		return
 	}
 	req, err := http.NewRequest("GET", distributionPoint, nil)
@@ -66,31 +83,37 @@ func newCRL(serialNumber *big.Int, distributionPoint string) (crl CRL) {
 	raw, err := client.Do(req)
 	if err != nil {
 		crl.Error = errors.Wrapf(err, "failed to retrieve CRL from distribution point %v", distributionPoint).Error()
+		crl.Status = BadResponse
 		return
 	}
 	defer raw.Body.Close()
 	if raw.StatusCode != http.StatusOK {
 		crl.Error = errors.New(fmt.Sprintf("wanted 200 response, got %d", raw.StatusCode)).Error()
+		crl.Status = BadResponse
 		return
 	}
 	b, err := ioutil.ReadAll(raw.Body)
 	if err != nil {
 		crl.Error = errors.Wrapf(err, "failed to read response from CRL distribution point %v", distributionPoint).Error()
+		crl.Status = BadResponse
+		return
 	}
 	c, err := x509.ParseCRL(b)
 	if err != nil {
 		crl.Error = errors.Wrapf(err, "failed to parse provided CRL\n%v", raw).Error()
+		crl.Status = BadResponse
 		return
 	}
 	if c.TBSCertList.RevokedCertificates == nil {
-		crl.Revoked = false
+		crl.Status = Good
 		return
 	}
 	for _, revoked := range c.TBSCertList.RevokedCertificates {
 		if revoked.SerialNumber.Cmp(serialNumber) == 0 {
-			crl.Revoked = true
-			break
+			crl.Status = Revoked
+			return
 		}
 	}
+	crl.Status = Good
 	return
 }

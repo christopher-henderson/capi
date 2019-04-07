@@ -418,6 +418,6 @@ func TestOneThing(t *testing.T) {
 	b, _ := pem.Decode(ffffff)
 	root, _ := x509.ParseCertificate(b.Bytes)
 	chain, _ := certificateUtils.GatherCertificateChain(subject)
-	chain = certificateUtils.EmplaceRoot(root)
-	VerifyChain(chain)
+	chain = certificateUtils.EmplaceRoot(chain, root)
+	t.Log(VerifyChain(chain))
 }

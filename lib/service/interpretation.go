@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/mozilla/capi/lib/expiration"
 	"github.com/mozilla/capi/lib/model"
+	"github.com/mozilla/capi/lib/revocation/crl"
 	"github.com/mozilla/capi/lib/revocation/ocsp"
 	log "github.com/sirupsen/logrus"
 	"strings"
@@ -134,7 +135,7 @@ func assertNotRevoked(cert model.CertificateResult, t CertType) (opinion model.O
 			log.Error(crlStatus.Error)
 			continue
 		}
-		if crlStatus.Revoked {
+		if crlStatus.Status == crl.Revoked {
 			opinion.Errors = append(opinion.Errors, model.Concern{
 				Raw: "",
 				Interpretation: fmt.Sprintf(
@@ -237,21 +238,21 @@ func assertNotRevoked(cert model.CertificateResult, t CertType) (opinion model.O
 func assertNotExpired(cert model.CertificateResult, t CertType) (opinion model.Opinion) {
 	if cert.Expiration.Status == expiration.Expired {
 		opinion.Errors = append(opinion.Errors, model.Concern{
-			Raw:            cert.Expiration.Raw,
+			Raw:            cert.Expiration.Error,
 			Interpretation: fmt.Sprintf("%s is expired", t),
 			Advise:         cert.CrtSh,
 		})
 	}
 	if cert.Expiration.Status == expiration.IssuerUnknown {
 		opinion.Errors = append(opinion.Errors, model.Concern{
-			Raw:            cert.Expiration.Raw,
+			Raw:            cert.Expiration.Error,
 			Interpretation: fmt.Sprintf("Bad chain at %s", t),
 			Advise:         cert.CrtSh,
 		})
 	}
 	if cert.Expiration.Error != "" {
 		opinion.Errors = append(opinion.Errors, model.Concern{
-			Raw:            cert.Expiration.Raw,
+			Raw:            cert.Expiration.Error,
 			Interpretation: fmt.Sprintf("fatal error at %s", t),
 			Advise:         cert.CrtSh,
 		})
@@ -262,7 +263,7 @@ func assertNotExpired(cert model.CertificateResult, t CertType) (opinion model.O
 func assertExpired(cert model.CertificateResult, t CertType) (opinion model.Opinion) {
 	if cert.Expiration.Status != expiration.Expired {
 		opinion.Errors = append(opinion.Errors, model.Concern{
-			Raw: cert.Expiration.Raw,
+			Raw: cert.Expiration.Error,
 			Interpretation: fmt.Sprintf("certutil does not believe that the %s certificate, %s, is expired",
 				t, cert.Fingerprint),
 			Advise: cert.CrtSh,
@@ -270,7 +271,7 @@ func assertExpired(cert model.CertificateResult, t CertType) (opinion model.Opin
 	}
 	if cert.Expiration.Status == expiration.IssuerUnknown {
 		opinion.Errors = append(opinion.Errors, model.Concern{
-			Raw: cert.Expiration.Raw,
+			Raw: cert.Expiration.Error,
 			Interpretation: fmt.Sprintf("certutil believes that the provided chain is broken for the %s certificate %s",
 				t, cert.Fingerprint),
 			Advise: cert.CrtSh,
@@ -278,7 +279,7 @@ func assertExpired(cert model.CertificateResult, t CertType) (opinion model.Opin
 	}
 	if cert.Expiration.Error != "" {
 		opinion.Errors = append(opinion.Errors, model.Concern{
-			Raw: cert.Expiration.Raw,
+			Raw: cert.Expiration.Error,
 			Interpretation: fmt.Sprintf("certutil encountered a fatal error when attempting to verify the %s certificate, %s",
 				t, cert.Fingerprint),
 			Advise: "This is likely an error in CAPI",
@@ -290,7 +291,7 @@ func assertExpired(cert model.CertificateResult, t CertType) (opinion model.Opin
 func assertMayBeExpired(cert model.CertificateResult, t CertType) (opinion model.Opinion) {
 	if cert.Expiration.Status == expiration.IssuerUnknown {
 		opinion.Errors = append(opinion.Errors, model.Concern{
-			Raw: cert.Expiration.Raw,
+			Raw: cert.Expiration.Error,
 			Interpretation: fmt.Sprintf("certutil believes that the provided chain is broken for the %s certificate %s",
 				t, cert.Fingerprint),
 			Advise: cert.CrtSh,
@@ -298,7 +299,7 @@ func assertMayBeExpired(cert model.CertificateResult, t CertType) (opinion model
 	}
 	if cert.Expiration.Error != "" {
 		opinion.Errors = append(opinion.Errors, model.Concern{
-			Raw: cert.Expiration.Raw,
+			Raw: cert.Expiration.Error,
 			Interpretation: fmt.Sprintf("certutil encountered a fatal error when attempting to verify the %s certificate, %s",
 				t, cert.Fingerprint),
 			Advise: "This is likely an error in CAPI",
@@ -334,7 +335,7 @@ func assertRevoked(cert model.CertificateResult, t CertType) (opinion model.Opin
 			log.Error(crlStatus.Error)
 			continue
 		}
-		if !crlStatus.Revoked {
+		if crlStatus.Status != crl.Revoked {
 			opinion.Errors = append(opinion.Errors, model.Concern{
 				Raw: "",
 				Interpretation: fmt.Sprintf(

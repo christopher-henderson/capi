@@ -70,9 +70,9 @@ const (
 )
 
 type OCSP struct {
+	Error     string
 	Responder string
 	Status    OCSPStatus
-	Error     string
 }
 
 func (o OCSP) MarshalJSON() ([]byte, error) {
@@ -147,7 +147,7 @@ func (o OCSPStatus) String() string {
 	case InternalError:
 		return `internalError`
 	default:
-		return `"error_unknown_ocsp_status"`
+		return `error_unknown_ocsp_status`
 	}
 }
 
