@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"github.com/mozilla/capi/lib/ccadb"
 	"github.com/mozilla/capi/lib/certificateUtils"
-	"github.com/mozilla/capi/lib/expiration/certutil"
 	"github.com/mozilla/capi/lib/model"
 	"github.com/mozilla/capi/lib/service"
 	"github.com/natefinch/lumberjack"
@@ -50,8 +49,10 @@ func main() {
 	}
 	verifyLimiter := httpRateLimiter.RateLimit(http.HandlerFunc(verify))
 	verifyCCADBLimiter := httpRateLimiter.RateLimit(http.HandlerFunc(verifyFromCCADB))
+	verifyFromCertificateDetailsLimiter := httpRateLimiter.RateLimit(http.HandlerFunc(verifyFromCertificateDetails))
 	http.Handle("/", verifyLimiter)
 	http.Handle("/fromreport", verifyCCADBLimiter)
+	http.Handle("/fromCertificateDetails", verifyFromCertificateDetailsLimiter)
 	port := Port()
 	addr := BindingAddress()
 	log.WithFields(log.Fields{"Binding Address": addr, "Port": port}).Info("Starting server")
@@ -122,9 +123,6 @@ func verify(resp http.ResponseWriter, req *http.Request) {
 		return
 	}
 	subject := s[0]
-	if !strings.HasPrefix(subject, "https://") {
-		subject = "https://" + subject
-	}
 	rawRoot, err := ioutil.ReadAll(req.Body)
 	if err != nil {
 		responseCode = http.StatusBadRequest
@@ -178,41 +176,21 @@ func verify(resp http.ResponseWriter, req *http.Request) {
 		response = "Bad root PEM, " + err.Error()
 		return
 	}
-	// Now we can begin our actual work of tattling on the CA.
-	result := model.TestWebsiteResult{SubjectURL: subject, Expectation: interpretation.String()}
-	defer func() {
-		switch r, err := json.MarshalIndent(result, "", "    "); err != nil {
-		case true:
-			responseCode = http.StatusBadGateway
-			response = "a fatal error occurred when serializing the response, " + err.Error()
-		case false:
-			response = string(r)
-		}
-	}()
-	// Reach out to the test website on a plain GET and extract the certificate chain from the request.
-	chain, err := certificateUtils.GatherCertificateChain(string(subject))
-	if err != nil {
-		// Leave this as a 200 as the remote CA test website not responding
-		// is a perfectly valid piece of information to report.
-		result.Error = err.Error()
-		result.Opinion.Bad = true
-		return
+	result := test(subject, root, interpretation)
+	switch r, err := json.MarshalIndent(result, "", "    "); err != nil {
+	case true:
+		responseCode = http.StatusBadGateway
+		response = "a fatal error occurred when serializing the response, " + err.Error()
+	case false:
+		response = string(r)
 	}
-	// The test website may include a trust anchor. If it does, then swap it out with
-	// the one our client wants to use, if not just tack our client's trust anchor onto the end.
-	chain = certificateUtils.EmplaceRoot(chain, root)
-	// And, finally, fill out chain verification information.
-	result.Chain = service.VerifyChain(chain)
-	service.InterpretResult(&result, interpretation)
-	go SaveChainIfBad(result)
 }
 
-func verifyFromCCADB(resp http.ResponseWriter, req *http.Request) {
+func verifyFromCCADB(resp http.ResponseWriter, _ *http.Request) {
 	defer func() {
 		if err := recover(); err != nil {
 			log.Error(err)
 		}
-		log.Info("dunnnn")
 	}()
 	report, err := ccadb.NewReport()
 	if err != nil {
@@ -246,8 +224,6 @@ func verifyFromCCADB(resp http.ResponseWriter, req *http.Request) {
 	resp.Write([]byte{'['})
 	jsonResp := json.NewEncoder(resp)
 	jsonResp.SetIndent("", "    ")
-	// Because some OCSP responders are returning HTML
-	//jsonResp.SetEscapeHTML(true)
 	i := 0
 	for answer := range ret {
 		i++
@@ -262,11 +238,64 @@ func verifyFromCCADB(resp http.ResponseWriter, req *http.Request) {
 	resp.Write([]byte{']'})
 }
 
-func test(subject string, root *x509.Certificate, expectation service.Expectation) (result model.TestWebsiteResult) {
-	result.SubjectURL = subject
-	result.Expectation = expectation.String()
+func streamJsonArray(w io.Writer, answers chan model.TestWebsiteResult, total int) {
+	w.Write([]byte{'['})
+	jsonResp := json.NewEncoder(w)
+	jsonResp.SetIndent("", "    ")
+	i := 0
+	for answer := range answers {
+		i++
+		jsonResp.Encode(answer)
+		if i < total {
+			w.Write([]byte{','})
+		}
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+	}
+	w.Write([]byte{']'})
+}
+
+func verifyFromCertificateDetails(resp http.ResponseWriter, req *http.Request) {
+	body, err := ioutil.ReadAll(req.Body)
+	if err != nil {
+		//@TODO
+	}
+	var records model.CCADBRecords
+	err = json.Unmarshal(body, &records)
+	if err != nil {
+		//@TODO
+	}
+	answers := make(chan model.TestWebsiteResult, len(records.CertificateDetails))
+	work := make(chan model.CCADBRecord, len(records.CertificateDetails))
+	for _, record := range records.CertificateDetails {
+		work <- record
+	}
+	close(work)
+	wg := sync.WaitGroup{}
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for record := range work {
+				root := record.PEM
+				answers <- test(record.TestWebsiteValid, root, service.Valid).SetRecordID(record.RecordID)
+				answers <- test(record.TestWebsiteExpired, root, service.Expired).SetRecordID(record.RecordID)
+				answers <- test(record.TestWebsiteRevoked, root, service.Revoked).SetRecordID(record.RecordID)
+			}
+		}()
+	}
+	go func() {
+		wg.Wait()
+		close(answers)
+	}()
+	streamJsonArray(resp, answers, len(records.CertificateDetails)*3)
+}
+
+func test(subject string, root *x509.Certificate, expectation service.Expectation) model.TestWebsiteResult {
+	result := model.NewTestWebsiteResult(subject, expectation.String())
 	if subject == "" {
-		return
+		return result
 	}
 	// Reach out to the test website on a plain GET and extract the certificate chain from the request.
 	chain, err := certificateUtils.GatherCertificateChain(subject)
@@ -274,13 +303,13 @@ func test(subject string, root *x509.Certificate, expectation service.Expectatio
 		// Leave this as a 200 as the remote CA test website not responding
 		// is a perfectly valid piece of information to report.
 		result.Error = err.Error()
-		result.Opinion.Bad = true
+		result.Opinion.Result = model.FAIL
 		result.Opinion.Errors = append(result.Opinion.Errors, model.Concern{
 			Raw:            err.Error(),
 			Interpretation: "The subject test website failed to respond within 10 seconds.",
 			Advise:         "Please check that " + subject + " is up and responding in a reasonable time.",
 		})
-		return
+		return result
 	}
 	// The test website may include a trust anchor. If it does, then swap it out with
 	// the one our client wants to use, if not just tack our client's trust anchor onto the end.
@@ -288,67 +317,7 @@ func test(subject string, root *x509.Certificate, expectation service.Expectatio
 	// And, finally, fill out chain verification information.
 	result.Chain = service.VerifyChain(chain)
 	service.InterpretResult(&result, expectation)
-	return
-}
-
-func SaveChainIfBad(result model.TestWebsiteResult) {
-	if !result.Opinion.Bad {
-		return
-	}
-	for _, err := range result.Opinion.Errors {
-		var dirname string
-		switch strings.Contains(err.Raw, certutil.ISSUER_UNKOWN) {
-		case true:
-			dirname = path.Join("dammit", result.Chain.Root.Fingerprint)
-		case false:
-			dirname = path.Join("yay", result.Chain.Root.Fingerprint)
-		}
-		writechain(dirname, result)
-		f2, err := os.Create(path.Join(dirname, result.Expectation+"_result"))
-		if err != nil {
-			log.Panicln(err)
-			return
-		}
-		defer f2.Close()
-		enc := json.NewEncoder(f2)
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(result); err != nil {
-			log.Panicln(err)
-		}
-	}
-}
-
-func writechain(dirname string, result model.TestWebsiteResult) {
-	if err := os.MkdirAll(dirname, 0777); err != nil {
-		log.Error(err)
-		return
-	}
-	f, err := os.Create(path.Join(dirname, result.Expectation))
-	if err != nil {
-		log.Panicln(err)
-		return
-	}
-	defer f.Close()
-	for _, inter := range result.Chain.Intermediates {
-		if err := pem.Encode(f, &pem.Block{"CERTIFICATE", nil, inter.Certificate.Raw}); err != nil {
-			log.Panicln(err)
-			return
-		}
-	}
-	if err := pem.Encode(f, &pem.Block{"CERTIFICATE", nil, result.Chain.Leaf.Certificate.Raw}); err != nil {
-		log.Panicln(err)
-		return
-	}
-	rootf, err := os.Create(path.Join(dirname, result.Expectation+"_root"))
-	if err != nil {
-		log.Panicln(err)
-		return
-	}
-	defer rootf.Close()
-	if err := pem.Encode(rootf, &pem.Block{"CERTIFICATE", nil, result.Chain.Root.Certificate.Raw}); err != nil {
-		log.Panicln(err)
-		return
-	}
+	return result
 }
 
 func Home() string {

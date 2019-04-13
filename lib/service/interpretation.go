@@ -92,8 +92,11 @@ func InterpretResult(result *model.TestWebsiteResult, expectation Expectation) {
 		result.Opinion.Append(assertNotRevoked(result.Chain.Root, Root))
 	}
 
-	if len(result.Opinion.Errors) != 0 {
-		result.Opinion.Bad = true
+	switch len(result.Opinion.Errors) == 0 {
+	case true:
+		result.Opinion.Result = model.PASS
+	case false:
+		result.Opinion.Result = model.FAIL
 	}
 }
 

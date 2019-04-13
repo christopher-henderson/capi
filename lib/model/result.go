@@ -6,6 +6,7 @@ package model
 
 import (
 	"crypto/x509"
+	"encoding/json"
 	"github.com/mozilla/capi/lib/certificateUtils"
 	"github.com/mozilla/capi/lib/expiration"
 	"github.com/mozilla/capi/lib/revocation/crl"
@@ -14,10 +15,24 @@ import (
 
 type TestWebsiteResult struct {
 	SubjectURL  string
+	RecordID    string `json:"RecordID,omitempty"`
 	Expectation string
 	Chain       ChainResult
 	Opinion     Opinion
 	Error       string
+}
+
+func NewTestWebsiteResult(subject, expectation string) TestWebsiteResult {
+	return TestWebsiteResult{
+		SubjectURL:  subject,
+		Expectation: expectation,
+		Opinion:     NewOpinion(),
+	}
+}
+
+func (t TestWebsiteResult) SetRecordID(id string) TestWebsiteResult {
+	t.RecordID = id
+	return t
 }
 
 type ChainResult struct {
@@ -26,17 +41,44 @@ type ChainResult struct {
 	Root          CertificateResult
 }
 
+type OpinionResult = bool
+
+const (
+	PASS OpinionResult = true
+	FAIL OpinionResult = false
+)
+
 type Opinion struct {
-	Bad      bool // Whether this opinion thinks the run is bad in some way.
-	Errors   []Concern
-	Warnings []Concern
-	Info     []Concern
+	Result OpinionResult // Whether this opinion thinks the run is bad in some way.
+	Errors []Concern
+}
+
+func (o Opinion) MarshalJSON() ([]byte, error) {
+	var result string
+	switch o.Result {
+	case PASS:
+		result = "PASS"
+	case FAIL:
+		result = "FAIL"
+	}
+	return json.Marshal(struct {
+		Result string
+		Errors []Concern
+	}{
+		Result: result,
+		Errors: o.Errors,
+	})
+}
+
+func NewOpinion() Opinion {
+	return Opinion{
+		Result: FAIL,
+		Errors: make([]Concern, 0),
+	}
 }
 
 func (o *Opinion) Append(other Opinion) {
 	o.Errors = append(o.Errors, other.Errors...)
-	o.Warnings = append(o.Warnings, other.Warnings...)
-	o.Info = append(o.Info, other.Info...)
 }
 
 type Concern struct {
